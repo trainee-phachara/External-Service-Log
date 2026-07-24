@@ -38,8 +38,13 @@ func (h *LogrusHook) Fire(entry *logrus.Entry) error {
 		return nil
 	}
 
+	source := h.source
+	if svc, ok := stringField(entry.Data, "service_name"); ok {
+		source.ServiceName = svc
+	}
+
 	input := LogEntryInput{
-		Source:       h.source,
+		Source:       source,
 		TraceID:      traceID,
 		Endpoint:     endpoint,
 		HTTPStatus:   httpStatus,
@@ -85,12 +90,13 @@ func marshalField(data logrus.Fields, key string) string {
 }
 
 var consumedFields = map[string]struct{}{
-	"trace_id":    {},
-	"endpoint":    {},
-	"http_status": {},
-	"type":        {},
-	"direction":   {},
-	"payload":     {},
+	"trace_id":     {},
+	"endpoint":     {},
+	"http_status":  {},
+	"type":         {},
+	"direction":    {},
+	"payload":      {},
+	"service_name": {},
 }
 
 func buildMetadata(entry *logrus.Entry) string {

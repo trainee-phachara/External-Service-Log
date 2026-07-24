@@ -138,6 +138,71 @@ func TestFire_ExplicitFieldsOverrideDefaults(t *testing.T) {
 	}
 }
 
+func TestFire_ServiceNameOverridesDefault(t *testing.T) {
+	client := &fakeLogClient{}
+	logger := newHookLogger(NewLogrusHook(client, testSource))
+
+	logger.WithFields(logrus.Fields{
+		"trace_id":     "trace-3",
+		"endpoint":     "/users/1",
+		"http_status":  "200",
+		"service_name": "user-service",
+	}).Info("validated user")
+
+	recorded := client.recorded()
+	if len(recorded) != 1 {
+		t.Fatalf("SendLog called %d times, want 1", len(recorded))
+	}
+	got := recorded[0]
+
+	if got.Source.AppName != testSource.AppName {
+		t.Errorf("AppName = %q, want %q", got.Source.AppName, testSource.AppName)
+	}
+	if got.Source.ServiceName != "user-service" {
+		t.Errorf("ServiceName = %q, want %q", got.Source.ServiceName, "user-service")
+	}
+}
+
+func TestFire_DefaultServiceNameKeptWhenNoField(t *testing.T) {
+	client := &fakeLogClient{}
+	logger := newHookLogger(NewLogrusHook(client, testSource))
+
+	logger.WithFields(logrus.Fields{
+		"trace_id":    "trace-4",
+		"endpoint":    "/orders",
+		"http_status": "201",
+	}).Info("order created")
+
+	recorded := client.recorded()
+	if len(recorded) != 1 {
+		t.Fatalf("SendLog called %d times, want 1", len(recorded))
+	}
+	if recorded[0].Source != testSource {
+		t.Errorf("Source = %+v, want %+v", recorded[0].Source, testSource)
+	}
+}
+
+func TestFire_ServiceNameNotLeakedToMetadata(t *testing.T) {
+	client := &fakeLogClient{}
+	logger := newHookLogger(NewLogrusHook(client, testSource))
+
+	logger.WithFields(logrus.Fields{
+		"trace_id":     "trace-5",
+		"endpoint":     "/users/1",
+		"http_status":  "200",
+		"service_name": "user-service",
+	}).Info("ok")
+
+	recorded := client.recorded()
+	if len(recorded) != 1 {
+		t.Fatalf("SendLog called %d times, want 1", len(recorded))
+	}
+	metadata := unmarshalMetadata(t, recorded[0].MetadataJSON)
+	if _, leaked := metadata["service_name"]; leaked {
+		t.Error("service_name leaked into metadata, want it consumed")
+	}
+}
+
 func unmarshalMetadata(t *testing.T, s string) map[string]any {
 	t.Helper()
 	var m map[string]any
