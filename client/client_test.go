@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/trainee-phachara/External-Serivce-Log/client/pb"
+	pb "github.com/trainee-phachara/External-Service-Log/client/pb"
 )
 
 type fakeIngestServer struct {

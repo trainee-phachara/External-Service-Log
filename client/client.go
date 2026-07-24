@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	pb "github.com/trainee-phachara/External-Serivce-Log/client/pb"
+	pb "github.com/trainee-phachara/External-Service-Log/client/pb"
 )
 
 // LogSource identifies the application/service emitting a log entry.

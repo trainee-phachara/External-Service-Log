@@ -12,9 +12,10 @@ import (
 	"external-service-log/internal/types"
 )
 
-// ttlSeconds is how long documents remain in each time-series collection
-// before MongoDB automatically expires them (30 days).
-const ttlSeconds = 60 * 60 * 24 * 30
+// ttlSeconds is how long documents remain in the hot collection before MongoDB
+// expires them (40 days). The extra 10 days beyond the 30-day archive window
+// gives the archiver time to copy data before TTL deletes it.
+const ttlSeconds = 60 * 60 * 24 * 40
 
 
 // Store persists buffered logs into MongoDB time-series collections.

@@ -1,36 +1,138 @@
 services:
 
-  # ── Databases ────────────────────────────────────────────────────────────────
+  # ── MongoDB Sharded Cluster ───────────────────────────────────────────────────
+  #
+  # Topology:
+  #   configsvr  ← stores cluster metadata (replica set: rs-config)
+  #   shard1     ← holds ~half the data   (replica set: rs-shard1)
+  #   shard2     ← holds ~half the data   (replica set: rs-shard2)
+  #   mongos     ← query router; this is what the app connects to
+  #
+  # Boot order:
+  #   1. configsvr + shard1 + shard2 start (parallel)
+  #   2. mongo-init-rs  → initializes all three replica sets, then exits
+  #   3. mongos         → starts after mongo-init-rs succeeds
+  #   4. mongo-init-sharding → adds shards, enables sharding, creates
+  #                            service_logs collection, then exits
+  #   5. external-service-log + archiver start
 
-  mongo:
+  configsvr:
     image: mongo:7
-    ports:
-      - "27017:27017"
+    command: ["mongod", "--configsvr", "--replSet", "rs-config", "--port", "27017", "--bind_ip_all"]
     volumes:
-      - mongo_data:/data/db
+      - configsvr_data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/27017'"]
+      interval: 3s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 5s
+
+  shard1:
+    image: mongo:7
+    command: ["mongod", "--shardsvr", "--replSet", "rs-shard1", "--port", "27017", "--bind_ip_all"]
+    volumes:
+      - shard1_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/27017'"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  shard2:
+    image: mongo:7
+    command: ["mongod", "--shardsvr", "--replSet", "rs-shard2", "--port", "27017", "--bind_ip_all"]
+    volumes:
+      - shard2_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/27017'"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  mongo-init-rs:
+    image: mongo:7
+    depends_on:
+      configsvr:
+        condition: service_healthy
+      shard1:
+        condition: service_healthy
+      shard2:
+        condition: service_healthy
+    volumes:
+      - ./scripts/init-rs.sh:/scripts/init-rs.sh
+    command: ["/bin/bash", "/scripts/init-rs.sh"]
+    restart: "no"
+
+  mongos:
+    image: mongo:7
+    command: ["mongos", "--configdb", "rs-config/configsvr:27017", "--bind_ip_all"]
+    ports:
+      - "27020:27017"
+    depends_on:
+      mongo-init-rs:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.runCommand({ping:1}).ok' | grep -q '^1$'"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+
+  mongo-init-sharding:
+    image: mongo:7
+    depends_on:
+      mongos:
+        condition: service_healthy
+    volumes:
+      - ./scripts/init-sharding.sh:/scripts/init-sharding.sh
+    command: ["/bin/bash", "/scripts/init-sharding.sh"]
+    restart: "no"
 
   # ── Services ─────────────────────────────────────────────────────────────────
 
   external-service-log:
     build: ./services/external-service-log
+    restart: unless-stopped
     ports:
       - "3000:3000"
       - "50051:50051"
     environment:
       PORT: 3000
       GRPC_PORT: 50051
+      MONGO_URI: mongodb://mongos:27017
+      MONGO_DB_NAME: service_logs
+    depends_on:
+      mongo-init-sharding:
+        condition: service_completed_successfully
+
+  archiver:
+    build: ./services/external-service-log
+    command: ["/bin/sh", "-c", "while true; do ./archiver; echo 'archiver: sleeping 24h'; sleep 86400; done"]
+    environment:
+      MONGO_URI: mongodb://mongos:27017
+      MONGO_DB_NAME: service_logs
+    depends_on:
+      mongo-init-sharding:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  archiver:
+    build: ./services/external-service-log
+    command: ["/bin/sh", "-c", "while true; do ./archiver; echo 'archiver: sleeping 24h'; sleep 86400; done"]
+    environment:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB_NAME: service_logs
     depends_on:
       mongo:
         condition: service_healthy
+    restart: unless-stopped
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
 
 volumes:
-  mongo_data:
+  configsvr_data:
+  shard1_data:
+  shard2_data:
